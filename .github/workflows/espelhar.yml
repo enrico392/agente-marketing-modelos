@@ -1,0 +1,31 @@
+name: Espelhar modelos da locução
+# Roda uma vez (Actions → "Espelhar modelos da locução" → Run workflow).
+# Baixa do Hugging Face os arquivos públicos (sem token, sem login) e publica tudo como release deste repositório.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Nome do release"
+        default: "chatterbox-mtl-v1"
+        required: true
+permissions:
+  contents: write
+jobs:
+  espelhar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Baixar e dividir
+        run: python modelos.py espelhar --saida release
+      - name: Publicar release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete "${{ inputs.tag }}" --yes --cleanup-tag || true
+          gh release create "${{ inputs.tag }}" release/* \
+            --title "Modelos da locução (${{ inputs.tag }})" \
+            --notes "Cópia dos pesos públicos do Chatterbox Multilingual (ResembleAI/chatterbox, licença MIT) e do Whisper small (Systran/faster-whisper-small, licença MIT), para a skill video-ads rodar offline, sem Hugging Face e sem login. Arquivos acima de 1,9 GB vão em partes; o manifesto.json traz o SHA-256 de cada arquivo."
