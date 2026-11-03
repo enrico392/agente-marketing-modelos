@@ -11,9 +11,10 @@ Uso:
   python3 modelos.py baixar   [--repo dono/repositorio] [--tag chatterbox-mtl-v1] [--destino pasta]
   python3 modelos.py espelhar --saida pasta
   python3 modelos.py conferir [--destino pasta]
-Repositório padrão: LOCUCAO_MODELOS_REPO (ex.: enricogms/agente-marketing-modelos).
+Repositório padrão: enrico392/agente-marketing-modelos (troque com LOCUCAO_MODELOS_REPO ou --repo).
 Licença dos pesos: MIT (ResembleAI/chatterbox) — o LICENSE vai junto no release.
 """
+import time
 import argparse, hashlib, json, os, shutil, sys, urllib.request
 
 CONJUNTOS = {  # pasta local -> (repositório público de origem, arquivos)
@@ -34,19 +35,41 @@ def sha256(p):
     return h.hexdigest()
 
 
-def baixar_url(url, dest):
+def baixar_url(url, dest, tentativas=8):
+    """Baixa com retomada (Range): conexão que cai no meio continua de onde parou, até o tamanho bater."""
     tmp = dest + ".parcial"
-    req = urllib.request.Request(url, headers={"User-Agent": "agente-marketing-locucao"})
-    with urllib.request.urlopen(req, timeout=120) as r, open(tmp, "wb") as f:
-        total = int(r.headers.get("Content-Length") or 0); feito = 0
-        while True:
-            b = r.read(1 << 22)
-            if not b:
-                break
-            f.write(b); feito += len(b)
-            if total:
-                print(f"\r  {os.path.basename(dest)}: {feito * 100 // total}%", end="", file=sys.stderr)
+    total = 0
+    for t in range(tentativas):
+        feito = os.path.getsize(tmp) if os.path.exists(tmp) else 0
+        hdr = {"User-Agent": "agente-marketing-locucao"}
+        if feito:
+            hdr["Range"] = f"bytes={feito}-"
+        try:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=hdr), timeout=120) as r:
+                if feito and r.status != 206:
+                    feito = 0  # servidor ignorou o Range: recomeça
+                if r.status == 206:
+                    total = int((r.headers.get("Content-Range") or "/0").rsplit("/", 1)[1] or 0)
+                else:
+                    total = int(r.headers.get("Content-Length") or 0)
+                with open(tmp, "ab" if feito else "wb") as f:
+                    while True:
+                        b = r.read(1 << 22)
+                        if not b:
+                            break
+                        f.write(b); feito += len(b)
+                        if total:
+                            print(f"\r  {os.path.basename(dest)}: {feito * 100 // total}%", end="", file=sys.stderr)
+        except Exception as e:
+            print(f"\n  conexão caiu ({e}); retomando", file=sys.stderr)
+        if total and os.path.getsize(tmp) >= total:
+            break
+        if not total and t > 0:
+            break
+        time.sleep(2 + t * 2)
     print(file=sys.stderr)
+    if total and os.path.getsize(tmp) != total:
+        sys.exit(f"{os.path.basename(dest)}: baixou {os.path.getsize(tmp)} de {total} bytes; rode de novo")
     os.replace(tmp, dest)
 
 
@@ -121,7 +144,7 @@ def conferir(raiz):
 
 if __name__ == "__main__":
     ap = argparse.ArgumentParser(); ap.add_argument("acao", choices=["baixar", "espelhar", "conferir"])
-    ap.add_argument("--repo", default=os.environ.get("LOCUCAO_MODELOS_REPO", "")); ap.add_argument("--tag", default=TAG)
+    ap.add_argument("--repo", default=os.environ.get("LOCUCAO_MODELOS_REPO", "enrico392/agente-marketing-modelos")); ap.add_argument("--tag", default=TAG)
     ap.add_argument("--destino", default=RAIZ); ap.add_argument("--saida", default="modelos")
     a = ap.parse_args()
     if a.acao == "espelhar":
